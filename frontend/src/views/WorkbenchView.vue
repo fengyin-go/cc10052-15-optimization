@@ -12,6 +12,14 @@
         <button class="btn" data-testid="export" type="button" @click="exportRows">
           导出{{ meta.name }}清单
         </button>
+        <RouterLink
+          v-if="decisionLink"
+          class="btn"
+          :to="decisionLink.path"
+          data-testid="decision-link"
+        >
+          {{ decisionLink.label }}
+        </RouterLink>
       </div>
     </header>
 
@@ -107,6 +115,16 @@ import type { EntryRow } from '@/data/types'
 
 const props = defineProps<{ moduleKey: string }>()
 const meta = moduleMeta(props.moduleKey)
+// 告警判定和评审材料的入口放在相关模块页头，直接跳到工作台。
+const decisionLink = computed(() => {
+  if (props.moduleKey === 'anomaly_metric') {
+    return { path: '/anomaly_decision', label: '打开告警判定工作台' }
+  }
+  if (props.moduleKey === 'conclusion_review') {
+    return { path: '/anomaly_decision', label: '核对评审材料依据' }
+  }
+  return null
+})
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')

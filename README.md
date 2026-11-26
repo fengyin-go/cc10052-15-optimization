@@ -62,7 +62,7 @@ npm run dev
 | 报告分发 | `report_dist` | 分发记录 | 分发批次、报告编码、接收方 |
 | 窗口调度器 | `window_scheduler` | 调度计划 | 计划名称、指标编码、窗口粒度 |
 | 数据时效监控 | `data_freshness` | 时效记录 | 监控对象、数据域、最新水位 |
-| 指标异常检测 | `anomaly_metric` | 异常事件 | 异常编号、指标编码、基线区间 |
+| 指标异常检测 | `anomaly_metric` | 异常事件 | 异常编号、指标编码、触发基线版本 |
 | 实验归档库 | `exp_archive` | 归档实验 | 实验编码、结束时间、结论摘要 |
 | 样本量核对 | `sample_ratio` | 核对结果 | 核对批次、实验编码、计划比例 |
 | AA预检器 | `aa_check` | AA检验 | 检验编码、实验编码、检验窗口 |
@@ -81,3 +81,40 @@ npm run dev
 
 领域：数据工程
 子方向：数据分析与数据应用
+
+## 告警判定与评审材料
+
+指标异常的可追查判定走一条独立链路，页面上对应 `告警判定工作台`（`/anomaly_decision`）：
+
+- `backend/app/decision.py`：纯判定规则。基线、观测值和阈值必须属于同一指标窗口；
+  零基线只比较绝对偏差、不做除法；观测数少于 `MIN_OBSERVATIONS` 的窗口单独挂起，
+  不把“无数据”当成“已达标”；可交付的判定生成 `DEC-` 开头的判定凭证。
+- `backend/app/decision_service.py`：基线版本与阈值版本管理。同窗口新基线只会让旧版本
+  失效并追加新凭证，旧评估记录与它当时用的阈值版本、原始偏差原样保留。
+- `backend/app/review_workflow.py`：评审材料领取、重新评估冲突、按依据接受办结或要求重算。
+- `backend/app/routers/decision.py`：`/api/decision/...` 固定前缀接口，注册顺序在通用
+  `/api/{module}` 之前。
+
+相关内部表：`anomaly_baseline`（基线版本）、`anomaly_threshold`（阈值版本）、
+`anomaly_observation`（指标窗口观测）、`anomaly_evaluation`（判定凭证）。
+示例数据由 `backend/app/seed.py` 与 `backend/app/seed_scenario.py` 共同构造，
+`store.reset()` 可回到初始场景。
+
+### O12 演示场景
+
+示例里 O12 已按基线 `BL-12-20261101` / 阈值 `TH-v3` 确认异常并提交评审 `RV-AN-1`，
+材料尚未领取；随后新基线 `BL-12-20261125` / 阈值 `TH-v4` 生效，同一观测偏差从
+12.00% 降到 6.67%，低于阈值。可以按以下顺序核对：
+
+```bash
+# 1. 领取材料，固化本次依据
+curl -X POST http://127.0.0.1:8022/api/decision/reviews/RV-AN-1/claim -H 'Content-Type: application/json' -d '{}'
+# 2. 从检测入口重新提交该窗口的评估（只会用当前生效基线/阈值版本）
+curl -X POST http://127.0.0.1:8022/api/decision/evaluate -H 'Content-Type: application/json'   -d '{"observation_id": 1, "client_request_id": "demo-1"}'
+# 3. 读取评审材料：本次依据与当前依据分开显示，冲突提示要求重新领取
+curl http://127.0.0.1:8022/api/decision/reviews/RV-AN-1/material
+# 4. 旧凭证仍可按原依据复算
+curl -X POST http://127.0.0.1:8022/api/decision/evaluations/EV-0001/recalculate
+# 5. 重新领取后按新凭证接受办结
+curl -X POST http://127.0.0.1:8022/api/decision/reviews/RV-AN-1/accept -H 'Content-Type: application/json' -d '{}'
+```
